@@ -3,6 +3,7 @@ import p7sync
 import requests
 import os
 import shutil
+import math
 
 HOME_FOLDER_URL = "http://localhost:8080/home"
 SERVER_FOLDER_URL = "http://localhost:8080/home/test"
@@ -23,7 +24,7 @@ class ClientTests(unittest.TestCase):
         delete(SERVER_FOLDER_URL)
         shutil.rmtree(LOCAL_FOLDER)
 
-    def test_sync_single_file(self):
+    def test_sync_create_delete_single_file(self):
         client_authenticate()
         # Create a file locally
         create_file("foo")
@@ -45,7 +46,7 @@ class ClientTests(unittest.TestCase):
         self.assertEquals(0, len(server_contents))
         self.assertTrue("foo" not in server_contents)
 
-    def test_sync_multiples_files(self):
+    def test_sync_create_delete_multiple_files(self):
         client_authenticate()
         # Create a file locally
         create_file("foo")
@@ -80,6 +81,20 @@ class ClientTests(unittest.TestCase):
         self.assertTrue("foo" not in server_contents)
         self.assertTrue("bar" not in server_contents)
         self.assertTrue("raz" not in server_contents)
+
+    def test_sync_create_delete_single_file_large(self):
+        client_authenticate()
+        # Create a file locally
+        create_file("foo", length=int(math.pow(2, 23)))
+        # Sync
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Check what we have on server
+        server_contents = list_server(SERVER_FOLDER_URL)
+        self.assertEquals(1, len(server_contents))
+        self.assertTrue("foo" in server_contents)
+        # Get the file contents
+        data = get_file_data(SERVER_FOLDER_URL + "/foo")
+        self.assertEquals(math.pow(2, 23), len(data))
 
 def authenticate():
     data = { "name": USER_NAME, "password": USER_PASSWORD}
@@ -134,6 +149,13 @@ def create_file(name, length=100, contents=b'0'):
     data = contents * length
     path = os.path.join(LOCAL_FOLDER, name)
     with open(path, "wb") as output_file:
+        output_file.write(data)
+
+def update_file(name, length, offset=0, contents=b'0'):
+    data = contents * length
+    path = os.path.join(LOCAL_FOLDER, name)
+    with open(path, "r+b") as output_file:
+        output_file.seek(offset)
         output_file.write(data)
 
 def delete_file(name):
