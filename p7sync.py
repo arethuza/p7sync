@@ -187,7 +187,8 @@ def perform_put_file(action):
     _, file_path, url, version, file_length, file_hash = action
     data = read_block(file_path, 0)
     response = put_data(url, data)
-    version, server_length, server_hash = response["file_version"], response["file_length"], response["file_hash"]
+    props = response["props"]
+    version, server_length, server_hash = props["file_version"], props["file_length"], props["file_hash"]
     assert file_length == server_length
     assert file_hash == server_hash
 

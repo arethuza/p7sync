@@ -95,6 +95,32 @@ class ClientTests(unittest.TestCase):
         # Get the file contents
         data = get_file_data(SERVER_FOLDER_URL + "/foo")
         self.assertEquals(math.pow(2, 23), len(data))
+        # Delete file locally
+        delete_file("foo")
+        # Sync again
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Check file is gone from server
+        server_contents = list_server(SERVER_FOLDER_URL)
+        self.assertEquals(0, len(server_contents))
+        self.assertTrue("foo" not in server_contents)
+
+    def test_update_file(self):
+        client_authenticate()
+        # Create a file locally
+        create_file("foo")
+        # Sync
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Check what we have on server
+        server_contents = list_server(SERVER_FOLDER_URL)
+        self.assertEquals(1, len(server_contents))
+        self.assertTrue("foo" in server_contents)
+        # Get the file contents
+        data = get_file_data(SERVER_FOLDER_URL + "/foo")
+        self.assertEquals(b'0' * 100, data)
+        # Update the file
+        update_file("foo", 1, offset=30, contents=b'1')
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+
 
 def authenticate():
     data = { "name": USER_NAME, "password": USER_PASSWORD}
