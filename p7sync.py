@@ -46,9 +46,8 @@ def sync(dir_path, url):
     current_sync_state, local_changes = update_sync_state(dir_path, previous_sync_state)
     # push local changes to server
     server_sync_state = get_server_directory_state(url)
-    local_to_server_actions = calculate_local_to_server_actions(dir_path, url, local_changes, current_sync_state,
-                                                                server_sync_state)
-    perform_local_to_server_actions(local_to_server_actions)
+    local_to_server_actions = calculate_local_to_server_actions(dir_path, url, local_changes, current_sync_state)
+    perform_local_to_server_actions(local_to_server_actions, current_sync_state)
     # Perform actions - updating current dir state
     if len(local_changes) > 0:
         update_sync_state_file(dir_path, url, current_sync_state)
@@ -101,7 +100,7 @@ def update_sync_state(dir_path, previous_sync_state):
             else:
                 # A file we have seen before
                 previous_sync_state_entry = previous_sync_state[name]
-                previous_length = previous_sync_state_entry["length"]
+                previous_length = previous_sync_state_entry["file_length"]
                 current_length = os.path.getsize(path)
                 previous_modified = dateutil.parser.parse(previous_sync_state_entry["modified"])
                 current_modified = get_modified(path)
@@ -109,30 +108,29 @@ def update_sync_state(dir_path, previous_sync_state):
                     # Only calculate new entry if file may have changed
                     updated_entry = create_sync_state_entry(path)
                     sync_state_entry = current_sync_state[name]
-                    lengths_differ = updated_entry["length"] != sync_state_entry["length"]
-                    hashes_differ = updated_entry["hash"] != sync_state_entry["hash"]
+                    lengths_differ = updated_entry["file_length"] != sync_state_entry["file_length"]
+                    hashes_differ = updated_entry["file_hash"] != sync_state_entry["file_hash"]
                     if lengths_differ or hashes_differ:
                         current_sync_state[name] = updated_entry
                         previous_blocks = previous_sync_state_entry["block_hashes"]
                         updated_blocks = updated_entry["block_hashes"]
                         changed_blocks = get_changed_blocks(previous_blocks, updated_blocks)
-                        version = previous_sync_state_entry["version"]
-                        local_changes.append(("updated-file", name, changed_blocks))
+                        version = previous_sync_state_entry["file_version"]
+                        local_changes.append(("updated-file", name, version, changed_blocks))
         elif os.path.isdir(path):
             if not name in current_sync_state:
                 current_sync_state[name] = {"type": "dir"}
                 local_changes.append(("created-dir", name))
     return current_sync_state, local_changes
 
-
 def create_sync_state_entry(file_path):
     block_hashes = get_block_hashes(file_path)
     result = {
         "type": "file",
         "modified": get_modified(file_path).isoformat(),
-        "length": os.path.getsize(file_path),
-        "hash": get_file_hash(block_hashes),
-        "version": None,
+        "file_length": os.path.getsize(file_path),
+        "file_hash": get_file_hash(block_hashes),
+        "file_version": None,
         "block_hashes": block_hashes if len(block_hashes) > 1 else None
     }
     return result
@@ -145,7 +143,7 @@ def get_changed_blocks(blocks1, blocks2):
     return [(block_number, block_hash2) for block_number, (block_hash1, block_hash2)
             in enumerate(itertools.zip_longest(blocks1, blocks2)) if block_hash1 != block_hash2]
 
-def calculate_local_to_server_actions(dir_path, url, local_changes, local_sync_state, server_sync_state):
+def calculate_local_to_server_actions(dir_path, url, local_changes, local_sync_state):
     actions = []
     for change in local_changes:
         change_type = change[0]
@@ -154,65 +152,94 @@ def calculate_local_to_server_actions(dir_path, url, local_changes, local_sync_s
         path = os.path.join(dir_path, name)
         resource_url = url + "/" + name
         if change_type == "created-file" or change_type == "updated-file":
-            length = local_sync_state_entry["length"]
-            file_hash = local_sync_state_entry["hash"]
-            version = local_sync_state_entry["version"]
+            length = local_sync_state_entry["file_length"]
+            file_hash = local_sync_state_entry["file_hash"]
+            version = local_sync_state_entry["file_version"]
             if length <= BLOCK_LENGTH:
-                actions.append(("put-file", path, resource_url, version, length, file_hash))
+                actions.append(("put-file", path, name, resource_url))
             else:
                 actions.append(("post-file", url if version is None else resource_url, name, version))
                 changed_blocks = change[2]
                 last_changed_index = len(changed_blocks) - 1
                 for index, (block_number, block_hash) in enumerate(changed_blocks):
-                    actions.append(("put-block", path, resource_url, version, block_number, block_hash,
+                    actions.append(("put-block", path, name, resource_url, block_number, block_hash,
                                     index == last_changed_index))
-                pass
         elif change_type == "deleted":
-            actions.append(("delete-server", resource_url))
+            actions.append(("delete-server", resource_url, None))
     return actions
 
-def perform_local_to_server_actions(actions):
+def perform_local_to_server_actions(actions, current_sync_state):
     for action in actions:
         action_name = action[0]
+        file_name = action[2]
+        sync_state_entry = current_sync_state[file_name] if file_name is not None else None
         if action_name == "put-file":
-            perform_put_file(action)
+            perform_put_file(action, sync_state_entry)
         elif action_name == "delete-server":
             perform_delete_server(action)
         elif action_name == "post-file":
-            perform_post_file(action)
+            perform_post_file(action, sync_state_entry)
         elif action_name == "put-block":
-            perform_put_block(action)
+            perform_put_block(action, sync_state_entry)
 
-def perform_put_file(action):
-    _, file_path, url, version, file_length, file_hash = action
+def perform_put_file(action, sync_state_entry):
+    _, file_path, name, url = action
+    file_length = sync_state_entry["file_length"]
+    file_hash = sync_state_entry["file_hash"]
+    file_version = sync_state_entry["file_version"]
     data = read_block(file_path, 0)
     response = put_data(url, data)
     props = response["props"]
-    version, server_length, server_hash = props["file_version"], props["file_length"], props["file_hash"]
+    server_version, server_length, server_hash = props["file_version"], props["file_length"], props["file_hash"]
     assert file_length == server_length
     assert file_hash == server_hash
+    sync_state_entry["file_version"] = server_version
 
 def perform_delete_server(action):
-    _, url = action
+    _, url, name = action
     delete_resource(url)
 
-def perform_post_file(action):
+def perform_post_file(action, sync_state_entry):
     _, url, name, version = action
     data = {
         "name": name,
         "type": "file"
     }
     response = post(url, data)
+    props = response["props"]
+    sync_state_entry["file_version"] = props["file_version"]
 
-def perform_put_block(action):
-    _, path, url, version, block_number, block_hash, last_block = action
+def ensure_list_length(lst, length):
+    if lst is None:
+        return [None] * length
+    lst_length = len(lst)
+    if lst_length == length:
+        return lst
+    elif lst_length < length:
+        return lst.extend([None] * (length - lst_length))
+    elif lst_length > length:
+        return lst[:length]
+
+
+def perform_put_block(action, sync_state_entry):
+    _, path, _, url, block_number, block_hash, last_block = action
+    version = sync_state_entry["file_version"]
     data = read_block(path, block_number)
     params = {
-        "file_version": 0,
+        "file_version": version,
         "block_number": block_number,
         "last_block": last_block
     }
-    put_data(url, data, params=params)
+    response = put_data(url, data, params=params)
+    server_block_hash = response["block_hash"]
+    assert server_block_hash == block_hash
+    if last_block:
+        server_file_hash = response["file_hash"]
+        server_file_length = response["file_length"]
+        assert server_file_hash == sync_state_entry["file_hash"]
+        assert server_file_length == sync_state_entry["file_length"]
+
+
 
 def get_block_hashes(file_path):
     """ Get the hashes for the blocks in a local file """
