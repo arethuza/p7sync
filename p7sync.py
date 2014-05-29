@@ -249,11 +249,8 @@ def get_block_hashes(file_path):
 
 
 def get_file_hash(block_hashes):
-    if len(block_hashes) == 1:
-        return block_hashes[0]
-    else:
-        all_hashes = "".join(block_hashes)
-        return get_hash(all_hashes.encode("utf-8"))
+    all_hashes = "".join(block_hashes)
+    return get_hash(all_hashes.encode("utf-8"))
 
 
 def read_block(file_path, block_number):

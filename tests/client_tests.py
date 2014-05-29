@@ -118,7 +118,7 @@ class ClientTests(unittest.TestCase):
         self.assertEquals(1, sync_entry["file_version"])
         self.assertEquals(100, sync_entry["file_length"])
         self.assertIsNone(sync_entry["block_hashes"])
-        self.assertEquals("134e6543ddc35b40abb4f2f8aaaa2d0513a27e267beaf9081e29d84eba94017d", sync_entry["file_hash"])
+        self.assertEquals("a32b7936a50b7da5e436c582186a6f9b6d5919640afca1d1dd17be67d6e52057", sync_entry["file_hash"])
         # Check what we have on server
         server_contents = list_server(SERVER_FOLDER_URL)
         self.assertEquals(1, len(server_contents))
@@ -132,7 +132,7 @@ class ClientTests(unittest.TestCase):
         self.assertEquals(1, props["file_version"])
         self.assertEquals(100, props["file_length"])
         self.assertIsNone(sync_entry["block_hashes"])
-        self.assertEquals("134e6543ddc35b40abb4f2f8aaaa2d0513a27e267beaf9081e29d84eba94017d", props["file_hash"])
+        self.assertEquals("a32b7936a50b7da5e436c582186a6f9b6d5919640afca1d1dd17be67d6e52057", props["file_hash"])
         # Update the file
         update_file("foo", 2, offset=100, contents=b'1')
         p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
@@ -143,14 +143,14 @@ class ClientTests(unittest.TestCase):
         self.assertEquals(2, sync_entry["file_version"])
         self.assertEquals(102, sync_entry["file_length"])
         self.assertIsNone(sync_entry["block_hashes"])
-        self.assertEquals("63ae5be25fa17ddc57ed3d83742e40a5940d8e1fe82124967b37dd65000803fa", sync_entry["file_hash"])
+        self.assertEquals("84b2f309f4b3493f40b9fbfe1de040b163539ad234f9360ea03e8676d5bb3c3e", sync_entry["file_hash"])
         # Get the metadata for the file
         response = get_json(SERVER_FOLDER_URL + "/foo?view=meta")
         props = response["props"]
         self.assertEquals(2, props["file_version"])
         self.assertEquals(102, props["file_length"])
         self.assertIsNone(sync_entry["block_hashes"])
-        self.assertEquals("63ae5be25fa17ddc57ed3d83742e40a5940d8e1fe82124967b37dd65000803fa", props["file_hash"])
+        self.assertEquals("84b2f309f4b3493f40b9fbfe1de040b163539ad234f9360ea03e8676d5bb3c3e", props["file_hash"])
         # Delete file locally
         delete_file("foo")
         # Sync again
@@ -174,17 +174,17 @@ class ClientTests(unittest.TestCase):
         sync_file_contents = load_local_sync_file()
         sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL]
         sync_entry = sync_data_for_url["foo"]
-        self.assertEquals(1, sync_entry["file_version"])
-        self.assertEquals(100, sync_entry["file_length"])
-        self.assertIsNone(sync_entry["block_hashes"])
-        self.assertEquals("134e6543ddc35b40abb4f2f8aaaa2d0513a27e267beaf9081e29d84eba94017d", sync_entry["file_hash"])
+        self.assertEquals(0, sync_entry["file_version"])
+        self.assertEquals(13002342, sync_entry["file_length"])
+        self.assertIsNotNone(sync_entry["block_hashes"])
+        self.assertEquals("5fb0ff69587cad8c5050a84b4a729046333aa6077069b36c67ecca51fc316878", sync_entry["file_hash"])
         # Check what we have on server
         server_contents = list_server(SERVER_FOLDER_URL)
         self.assertEquals(1, len(server_contents))
         self.assertTrue("foo" in server_contents)
         # Get the file contents
         data = get_file_data(SERVER_FOLDER_URL + "/foo")
-        self.assertEquals(b'0' * 100, data)
+        self.assertEquals(b'0' * 13002342, data)
 
 def authenticate():
     data = { "name": USER_NAME, "password": USER_PASSWORD}
