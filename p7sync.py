@@ -62,6 +62,7 @@ def list_changes(dir_path):
         for change in local_changes:
             print("\t" + str(change))
 
+
 def update_local(dir_path, url):
     sync_file_contents = load_sync_file(dir_path)
     for url in sync_file_contents.keys():
@@ -72,6 +73,7 @@ def update_local(dir_path, url):
             update_sync_state_file(dir_path, url, current_sync_state)
             for change in local_changes:
                 print("\t" + str(change))
+
 
 def update_sync_state(dir_path, previous_sync_state):
     local_changes = []
@@ -123,6 +125,7 @@ def update_sync_state(dir_path, previous_sync_state):
                 local_changes.append(("created-dir", name))
     return current_sync_state, local_changes
 
+
 def create_sync_state_entry(file_path):
     block_hashes = get_block_hashes(file_path)
     result = {
@@ -135,6 +138,7 @@ def create_sync_state_entry(file_path):
     }
     return result
 
+
 def get_changed_blocks(blocks1, blocks2):
     if blocks2 is None:
         return None
@@ -143,6 +147,7 @@ def get_changed_blocks(blocks1, blocks2):
     return [(block_number, block_hash2) for block_number, (block_hash1, block_hash2)
             in enumerate(itertools.zip_longest(blocks1, blocks2))
             if block_hash1 != block_hash2 and block_hash2 is not None]
+
 
 def calculate_local_to_server_actions(dir_path, url, local_changes, local_sync_state):
     actions = []
@@ -175,6 +180,7 @@ def calculate_local_to_server_actions(dir_path, url, local_changes, local_sync_s
             actions.append(("delete-server", resource_url, None))
     return actions
 
+
 def perform_local_to_server_actions(actions, current_sync_state):
     for action in actions:
         action_name = action[0]
@@ -191,6 +197,7 @@ def perform_local_to_server_actions(actions, current_sync_state):
         elif action_name == "put-block":
             perform_put_block(action, sync_state_entry)
 
+
 def perform_put_file(action, sync_state_entry):
     _, file_path, name, url = action
     file_length = sync_state_entry["file_length"]
@@ -204,9 +211,11 @@ def perform_put_file(action, sync_state_entry):
     assert file_hash == server_hash
     sync_state_entry["file_version"] = server_version
 
+
 def perform_delete_server(action):
     _, url, name = action
     delete_resource(url)
+
 
 def perform_post_file(action, sync_state_entry):
     _, url, name = action
@@ -218,6 +227,7 @@ def perform_post_file(action, sync_state_entry):
     props = response["props"]
     sync_state_entry["file_version"] = props["file_version"]
 
+
 def perform_post_file_version(action, sync_state_entry):
     _, url, _, version = action
     data = {
@@ -225,6 +235,7 @@ def perform_post_file_version(action, sync_state_entry):
     }
     response = post(url, data)
     sync_state_entry["file_version"] = response["file_version"]
+
 
 def ensure_list_length(lst, length):
     if lst is None:
@@ -259,8 +270,6 @@ def perform_put_block(action, sync_state_entry):
         server_block_hash = response["block_hash"]
     if block_hash is not None:
         assert server_block_hash == block_hash
-
-
 
 
 def get_block_hashes(file_path):
@@ -331,7 +340,7 @@ def update_sync_state_file(dir_path, url, sync_state):
 def get_json(url, params=None):
     get_token(url)
     global USER_TOKEN
-    headers = {"Authorization": "bearer " + USER_TOKEN}
+    headers = {"Authorization": "Bearer " + USER_TOKEN}
     # Attempt 1
     response = requests.get(url, headers=headers, params=params)
     if response.status_code == 403:
@@ -363,7 +372,7 @@ def put_data(url, data, params=None):
     get_token(url)
     global USER_TOKEN
     headers = {
-        "Authorization": "bearer " + USER_TOKEN,
+        "Authorization": "Bearer " + USER_TOKEN,
         "Content-Type": "application/octet-stream",
         "Content-Length" : str(len(data))
     }
@@ -374,7 +383,7 @@ def post(url, data):
     get_token(url)
     global USER_TOKEN
     headers = {
-        "Authorization": "bearer " + USER_TOKEN
+        "Authorization": "Bearer " + USER_TOKEN
     }
     response = requests.post(url, headers=headers, data=data)
     if response.status_code != 200:
@@ -385,7 +394,7 @@ def delete_resource(url):
     get_token(url)
     global USER_TOKEN
     headers = {
-        "Authorization": "bearer " + USER_TOKEN,
+        "Authorization": "Bearer " + USER_TOKEN,
     }
     response = requests.delete(url, headers=headers)
     if response.status_code != 200:

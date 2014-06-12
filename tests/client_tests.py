@@ -228,14 +228,14 @@ def client_authenticate():
 
 def delete(url):
     headers = {
-        "Authorization": "bearer " + auth_token
+        "Authorization": "Bearer " + auth_token
     }
     response = requests.delete(url, headers=headers)
     pass
 
 def create(parent_url, name, type):
     headers = {
-        "Authorization": "bearer " + auth_token
+        "Authorization": "Bearer " + auth_token
     }
     data = {
         "name": name,
@@ -245,7 +245,7 @@ def create(parent_url, name, type):
 
 def list_server(url):
     headers = {
-        "Authorization": "bearer " + auth_token
+        "Authorization": "Bearer " + auth_token
     }
     params = {
         "return_dict": True
@@ -255,7 +255,7 @@ def list_server(url):
 
 def get_json(url):
     headers = {
-        "Authorization": "bearer " + auth_token
+        "Authorization": "Bearer " + auth_token
     }
     response = requests.get(url, headers=headers)
     return response.json
@@ -263,7 +263,7 @@ def get_json(url):
 
 def get_file_data(url):
     headers = {
-        "Authorization": "bearer " + auth_token
+        "Authorization": "Bearer " + auth_token
     }
     return requests.get(url, headers=headers).content
 
