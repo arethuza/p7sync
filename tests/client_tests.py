@@ -185,6 +185,30 @@ class ClientTests(unittest.TestCase):
         # Get the file contents
         data = get_file_data(SERVER_FOLDER_URL + "/foo")
         self.assertEquals(b'0' * 13002342, data)
+        # Modify a small part of the file
+        update_file("foo", offset=100, length=2, contents=b'1')
+        # Sync
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Check local sync file contents
+        sync_file_contents = load_local_sync_file()
+        sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL]
+        sync_entry = sync_data_for_url["foo"]
+        self.assertEquals(1, sync_entry["file_version"])
+        self.assertEquals(13002342, sync_entry["file_length"])
+        self.assertIsNotNone(sync_entry["block_hashes"])
+        self.assertEquals("31acf5958904d5338e49b69add031476ba2a55cb6d5acbeb5224770a06674117", sync_entry["file_hash"])
+        # Get the file contents
+        data = get_file_data(SERVER_FOLDER_URL + "/foo")
+        self.assertEquals(13002342, len(data))
+        self.assertEquals(48, data[99])
+        self.assertEquals(49, data[100])
+        self.assertEquals(49, data[101])
+        self.assertEquals(48, data[102])
+        # Modify the file so it is exactly 2 blocks long
+        create_file("foo", length=p7sync.BLOCK_LENGTH * 2, contents=b'2')
+        # Sync yet again
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+
 
 def authenticate():
     data = { "name": USER_NAME, "password": USER_PASSWORD}

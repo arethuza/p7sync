@@ -96,7 +96,7 @@ def update_sync_state(dir_path, previous_sync_state):
                 # A file has been created
                 entry = current_sync_state[name] = create_sync_state_entry(path)
                 changed_blocks = get_changed_blocks(None, entry["block_hashes"])
-                local_changes.append(("created-file", name, changed_blocks))
+                local_changes.append(("created-file", name, None, changed_blocks))
             else:
                 # A file we have seen before
                 previous_sync_state_entry = previous_sync_state[name]
@@ -141,7 +141,8 @@ def get_changed_blocks(blocks1, blocks2):
     if blocks1 is None:
         return list(enumerate(blocks2))
     return [(block_number, block_hash2) for block_number, (block_hash1, block_hash2)
-            in enumerate(itertools.zip_longest(blocks1, blocks2)) if block_hash1 != block_hash2]
+            in enumerate(itertools.zip_longest(blocks1, blocks2))
+            if block_hash1 != block_hash2 and block_hash2 is not None]
 
 def calculate_local_to_server_actions(dir_path, url, local_changes, local_sync_state):
     actions = []
@@ -153,17 +154,23 @@ def calculate_local_to_server_actions(dir_path, url, local_changes, local_sync_s
         resource_url = url + "/" + name
         if change_type == "created-file" or change_type == "updated-file":
             length = local_sync_state_entry["file_length"]
-            file_hash = local_sync_state_entry["file_hash"]
-            version = local_sync_state_entry["file_version"]
+            version = change[2]
             if length <= BLOCK_LENGTH:
+                # TODO - pass version up
                 actions.append(("put-file", path, name, resource_url))
             else:
-                actions.append(("post-file", url if version is None else resource_url, name, version))
-                changed_blocks = change[2]
-                last_changed_index = len(changed_blocks) - 1
+                if version is None:
+                    actions.append(("post-file", url, name))
+                else:
+                    actions.append(("post-file-version", resource_url, name, version))
+                changed_blocks = change[3]
+                last_block_number = math.ceil(length/BLOCK_LENGTH) - 1
+                last_block_changed = last_block_number in (block_number for (block_number, _) in changed_blocks)
                 for index, (block_number, block_hash) in enumerate(changed_blocks):
                     actions.append(("put-block", path, name, resource_url, block_number, block_hash,
-                                    index == last_changed_index))
+                                    (last_block_changed and index == last_block_number)))
+                if not last_block_changed:
+                    actions.append(("put-block", path, name, resource_url, last_block_number, None, True))
         elif change_type == "deleted":
             actions.append(("delete-server", resource_url, None))
     return actions
@@ -179,6 +186,8 @@ def perform_local_to_server_actions(actions, current_sync_state):
             perform_delete_server(action)
         elif action_name == "post-file":
             perform_post_file(action, sync_state_entry)
+        elif action_name == "post-file-version":
+            perform_post_file_version(action, sync_state_entry)
         elif action_name == "put-block":
             perform_put_block(action, sync_state_entry)
 
@@ -200,7 +209,7 @@ def perform_delete_server(action):
     delete_resource(url)
 
 def perform_post_file(action, sync_state_entry):
-    _, url, name, version = action
+    _, url, name = action
     data = {
         "name": name,
         "type": "file"
@@ -208,6 +217,14 @@ def perform_post_file(action, sync_state_entry):
     response = post(url, data)
     props = response["props"]
     sync_state_entry["file_version"] = props["file_version"]
+
+def perform_post_file_version(action, sync_state_entry):
+    _, url, _, version = action
+    data = {
+        "previous_version": version
+    }
+    response = post(url, data)
+    sync_state_entry["file_version"] = response["file_version"]
 
 def ensure_list_length(lst, length):
     if lst is None:
@@ -231,13 +248,18 @@ def perform_put_block(action, sync_state_entry):
         "last_block": last_block
     }
     response = put_data(url, data, params=params)
-    server_block_hash = response["block_hash"]
-    assert server_block_hash == block_hash
     if last_block:
-        server_file_hash = response["file_hash"]
-        server_file_length = response["file_length"]
+        props = response["props"]
+        server_block_hash = props["block_hash"]
+        server_file_hash = props["file_hash"]
+        server_file_length = props["file_length"]
         assert server_file_hash == sync_state_entry["file_hash"]
         assert server_file_length == sync_state_entry["file_length"]
+    else:
+        server_block_hash = response["block_hash"]
+    if block_hash is not None:
+        assert server_block_hash == block_hash
+
 
 
 
