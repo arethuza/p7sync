@@ -123,6 +123,8 @@ def update_sync_state(dir_path, previous_sync_state):
             if not name in current_sync_state:
                 current_sync_state[name] = {"type": "dir"}
                 local_changes.append(("created-dir", name))
+            else:
+                local_changes.append(("dir", name))
     return current_sync_state, local_changes
 
 
@@ -161,7 +163,6 @@ def calculate_local_to_server_actions(dir_path, url, local_changes, local_sync_s
             length = local_sync_state_entry["file_length"]
             version = change[2]
             if length <= BLOCK_LENGTH:
-                # TODO - pass version up
                 actions.append(("put-file", path, name, resource_url))
             else:
                 if version is None:
@@ -178,25 +179,34 @@ def calculate_local_to_server_actions(dir_path, url, local_changes, local_sync_s
                     actions.append(("put-block", path, name, resource_url, last_block_number, None, True))
         elif change_type == "deleted":
             actions.append(("delete-server", resource_url, None))
+        elif change_type == "created-dir":
+            actions.append(("post-folder-server", url, name))
+            actions.append(("sync", path, resource_url))
+        elif change_type == "dir":
+            actions.append(("sync", path, resource_url))
     return actions
 
 
 def perform_local_to_server_actions(actions, current_sync_state):
     for action in actions:
         action_name = action[0]
-        file_name = action[2]
-        sync_state_entry = current_sync_state[file_name] if file_name is not None else None
-        if action_name == "put-file":
-            perform_put_file(action, sync_state_entry)
-        elif action_name == "delete-server":
-            perform_delete_server(action)
-        elif action_name == "post-file":
-            perform_post_file(action, sync_state_entry)
-        elif action_name == "post-file-version":
-            perform_post_file_version(action, sync_state_entry)
-        elif action_name == "put-block":
-            perform_put_block(action, sync_state_entry)
-
+        if action_name != "sync":
+            file_name = action[2]
+            sync_state_entry = current_sync_state[file_name] if file_name is not None else None
+            if action_name == "put-file":
+                perform_put_file(action, sync_state_entry)
+            elif action_name == "delete-server":
+                perform_delete_server(action)
+            elif action_name == "post-file":
+                perform_post_file(action, sync_state_entry)
+            elif action_name == "post-file-version":
+                perform_post_file_version(action, sync_state_entry)
+            elif action_name == "put-block":
+                perform_put_block(action, sync_state_entry)
+            elif action_name == "post-folder-server":
+                perform_post_folder_server(action, sync_state_entry)
+        else:
+            perform_sync(action)
 
 def perform_put_file(action, sync_state_entry):
     _, file_path, name, url = action
@@ -226,7 +236,6 @@ def perform_post_file(action, sync_state_entry):
     response = post(url, data)
     props = response["props"]
     sync_state_entry["file_version"] = props["file_version"]
-
 
 def perform_post_file_version(action, sync_state_entry):
     _, url, _, version = action
@@ -271,6 +280,17 @@ def perform_put_block(action, sync_state_entry):
     if block_hash is not None:
         assert server_block_hash == block_hash
 
+def perform_post_folder_server(action, server_state_entry):
+    _, url, name = action
+    data = {
+        "name": name,
+        "type": "folder"
+    }
+    response = post(url, data)
+
+def perform_sync(action):
+    _, dir_path, url = action
+    sync(dir_path, url)
 
 def get_block_hashes(file_path):
     """ Get the hashes for the blocks in a local file """

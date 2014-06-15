@@ -5,6 +5,7 @@ import os
 import shutil
 import math
 import json
+import shutil
 
 HOME_FOLDER_URL = "http://localhost:8080/home"
 SERVER_FOLDER_URL = "http://localhost:8080/home/test"
@@ -38,6 +39,28 @@ class ClientTests(unittest.TestCase):
         # Get the file contents
         data = get_file_data(SERVER_FOLDER_URL + "/foo")
         self.assertEquals(b'0' * 100, data)
+        # Delete file locally
+        delete_file("foo")
+        # Sync again
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Check file is gone from server
+        server_contents = list_server(SERVER_FOLDER_URL)
+        self.assertEquals(0, len(server_contents))
+        self.assertTrue("foo" not in server_contents)
+
+    def test_sync_create_delete_empty_file(self):
+        client_authenticate()
+        # Create a file locally
+        create_file("foo", length=0)
+        # Sync
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Check what we have on server
+        server_contents = list_server(SERVER_FOLDER_URL)
+        self.assertEquals(1, len(server_contents))
+        self.assertTrue("foo" in server_contents)
+        # Get the file contents
+        data = get_file_data(SERVER_FOLDER_URL + "/foo")
+        self.assertEquals(b'', data)
         # Delete file locally
         delete_file("foo")
         # Sync again
@@ -208,6 +231,64 @@ class ClientTests(unittest.TestCase):
         create_file("foo", length=p7sync.BLOCK_LENGTH * 2, contents=b'2')
         # Sync yet again
         p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Check local sync file contents
+        sync_file_contents = load_local_sync_file()
+        sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL]
+        sync_entry = sync_data_for_url["foo"]
+        self.assertEquals(2, sync_entry["file_version"])
+        self.assertEquals(2 * p7sync.BLOCK_LENGTH, sync_entry["file_length"])
+        self.assertIsNotNone(sync_entry["block_hashes"])
+        self.assertEquals("967d6d6e037db5e3096738017ace6508ef3ef2b288205191a76c1f737fc41b79", sync_entry["file_hash"])
+        # Get the versions of the file
+        versions = get_json(SERVER_FOLDER_URL + "/foo?versions=true")
+        self.assertEquals(3, len(versions))
+        self.assertIsNone(versions[0]["previous_version"])
+        self.assertEquals(0, versions[1]["previous_version"])
+        self.assertEquals(1, versions[2]["previous_version"])
+
+    def test_file_in_folder(self):
+        client_authenticate()
+        # Create a file locally
+        create_file("foo", folder="f1")
+        # Sync
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Check local sync file contents
+        sync_file_contents = load_local_sync_file()
+        sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL]
+        self.assertEquals(1, len(sync_data_for_url))
+        sync_entry = sync_data_for_url["f1"]
+        self.assertEquals(1, len(sync_entry))
+        self.assertEquals("dir", sync_entry["type"])
+        # Check on server
+        response = get_json(SERVER_FOLDER_URL + "/f1")
+        children = response["children"]
+        self.assertEquals(1, len(children))
+        child_entry = children[0]
+        self.assertEquals("foo", child_entry["name"])
+        props = child_entry["props"]
+        self.assertEquals(1, props["file_version"])
+        self.assertEquals(100, props["file_length"])
+        self.assertEquals("a32b7936a50b7da5e436c582186a6f9b6d5919640afca1d1dd17be67d6e52057", props["file_hash"])
+        # Delete the file from the folder
+        delete_file("foo", folder="f1")
+        # Sync
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Check on server
+        response = get_json(SERVER_FOLDER_URL + "/f1")
+        children = response["children"]
+        self.assertEquals(0, len(children))
+        # Delete the folder
+        delete_dir("f1")
+        # Sync
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Check on server
+        self.assertIsNone(get_json(SERVER_FOLDER_URL + "/f1"))
+        response = get_json(SERVER_FOLDER_URL)
+        children = response["children"]
+        self.assertEquals(0, len(children))
+
+
+
 
 
 def authenticate():
@@ -267,9 +348,15 @@ def get_file_data(url):
     }
     return requests.get(url, headers=headers).content
 
-def create_file(name, length=100, contents=b'0'):
+def create_file(name, length=100, contents=b'0', folder=None):
     data = contents * length
-    path = os.path.join(LOCAL_FOLDER, name)
+    if folder is None:
+        path = os.path.join(LOCAL_FOLDER, name)
+    else:
+        folder_path = os.path.join(LOCAL_FOLDER, folder)
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        path = os.path.join(folder_path, name)
     with open(path, "wb") as output_file:
         output_file.write(data)
 
@@ -280,9 +367,18 @@ def update_file(name, length, offset=0, contents=b'0'):
         output_file.seek(offset)
         output_file.write(data)
 
-def delete_file(name):
-    path = os.path.join(LOCAL_FOLDER, name)
+def delete_file(name, folder=None):
+    if folder is None:
+        path = os.path.join(LOCAL_FOLDER, name)
+    else:
+        folder_path = os.path.join(LOCAL_FOLDER, folder)
+        path = os.path.join(folder_path, name)
     os.remove(path)
+
+def delete_dir(name):
+    path = os.path.join(LOCAL_FOLDER, name)
+    shutil.rmtree(path)
+
 
 def load_local_sync_file():
     path = os.path.join(LOCAL_FOLDER, p7sync.SYNC_FILE_NAME)
