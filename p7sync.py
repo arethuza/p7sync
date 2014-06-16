@@ -45,9 +45,12 @@ def sync(dir_path, url):
     previous_sync_state = load_sync_state(dir_path, url)
     current_sync_state, local_changes = update_sync_state(dir_path, previous_sync_state)
     # push local changes to server
-    server_sync_state = get_server_directory_state(url)
     local_to_server_actions = calculate_local_to_server_actions(dir_path, url, local_changes, current_sync_state)
     perform_local_to_server_actions(local_to_server_actions, current_sync_state)
+    # pull server changes locally
+    server_state = get_server_directory_state(url)
+
+    server_to_local_actions = calculate_server_to_local_actions(dir_path, url, current_sync_state, server_state)
     # Perform actions - updating current dir state
     if len(local_changes) > 0:
         update_sync_state_file(dir_path, url, current_sync_state)
@@ -207,6 +210,42 @@ def perform_local_to_server_actions(actions, current_sync_state):
                 perform_post_folder_server(action, sync_state_entry)
         else:
             perform_sync(action)
+
+def calculate_server_to_local_actions(dir_path, url, current_sync_state, server_state):
+    actions = []
+    # Check for anything to delete locally
+    for name, _ in current_sync_state.items():
+        if not name in server_state:
+            # Delete item locally
+            path = os.path.join(dir_path, name)
+            actions.append(("delete-local", path))
+    # Compare what is on server to what we have locally
+    for name, server_entry in server_state.items():
+        entry_type = server_entry["type"]
+        resource_url = url + "/" + name
+        path = os.path.join(dir_path, name)
+        if entry_type == "file":
+            props = server_entry["props"]
+            server_version = props["file_version"]
+            file_length = props["file_length"]
+            download_file = False
+            if name in current_sync_state:
+                local_entry = current_sync_state[name]
+                local_version = local_entry["file_version"]
+                download_file = local_version < server_version
+            else:
+                download_file = True
+            if download_file:
+                if file_length <= BLOCK_LENGTH:
+                    # Download file in 1 go
+                    actions.append(("get-file", url, path, server_version))
+                else:
+                    # Calculate blocks to download
+                    local_block_hashes = local_entry["block_hashes"]
+                    server_blocks_response = get_json(url, {"list_blocks": True, "file_version": server_version})
+                    server_block_hashes = [block_hash for _, _, _, block_hash, _ in server_blocks_response]
+        elif entry_type == "folder":
+            pass
 
 def perform_put_file(action, sync_state_entry):
     _, file_path, name, url = action
