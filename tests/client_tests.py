@@ -12,6 +12,7 @@ SERVER_FOLDER_URL = "http://localhost:8080/home/test"
 USER_NAME = "system"
 USER_PASSWORD = "password"
 LOCAL_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_dir")
+LOCAL_FOLDER2 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_dir2")
 
 class ClientTests(unittest.TestCase):
 
@@ -21,6 +22,9 @@ class ClientTests(unittest.TestCase):
         if os.path.exists(LOCAL_FOLDER):
             shutil.rmtree(LOCAL_FOLDER)
         os.makedirs(LOCAL_FOLDER)
+        if os.path.exists(LOCAL_FOLDER2):
+            shutil.rmtree(LOCAL_FOLDER2)
+        os.makedirs(LOCAL_FOLDER2)
 
     def tearDown(self):
         delete(SERVER_FOLDER_URL)
@@ -287,6 +291,22 @@ class ClientTests(unittest.TestCase):
         children = response["children"]
         self.assertEquals(0, len(children))
 
+    def test_download_file(self):
+        client_authenticate()
+        # Create a file locally & sync
+        create_file("foo")
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Download to folder 2
+        p7sync.sync(LOCAL_FOLDER2, SERVER_FOLDER_URL)
+        # Check what we have locally
+        sync_file_contents = load_local_sync_file(folder=LOCAL_FOLDER2)
+        sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL]
+        sync_entry = sync_data_for_url["foo"]
+        self.assertEquals(1, sync_entry["file_version"])
+        self.assertEquals(100, sync_entry["file_length"])
+        self.assertIsNone(sync_entry["block_hashes"])
+        self.assertEquals("a32b7936a50b7da5e436c582186a6f9b6d5919640afca1d1dd17be67d6e52057", sync_entry["file_hash"])
+
 
 
 
@@ -380,8 +400,8 @@ def delete_dir(name):
     shutil.rmtree(path)
 
 
-def load_local_sync_file():
-    path = os.path.join(LOCAL_FOLDER, p7sync.SYNC_FILE_NAME)
+def load_local_sync_file(folder=LOCAL_FOLDER):
+    path = os.path.join(folder, p7sync.SYNC_FILE_NAME)
     with open(path, "r") as input_file:
         data = input_file.read()
         return json.loads(data)

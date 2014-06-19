@@ -51,8 +51,9 @@ def sync(dir_path, url):
     server_state = get_server_directory_state(url)
 
     server_to_local_actions = calculate_server_to_local_actions(dir_path, url, current_sync_state, server_state)
+    perform_server_to_local_actions(server_to_local_actions, current_sync_state)
     # Perform actions - updating current dir state
-    if len(local_changes) > 0:
+    if len(local_to_server_actions) > 0 or len(server_to_local_actions) > 0:
         update_sync_state_file(dir_path, url, current_sync_state)
 
 
@@ -228,6 +229,7 @@ def calculate_server_to_local_actions(dir_path, url, current_sync_state, server_
             props = server_entry["props"]
             server_version = props["file_version"]
             file_length = props["file_length"]
+            file_hash = props["file_hash"]
             download_file = False
             if name in current_sync_state:
                 local_entry = current_sync_state[name]
@@ -238,7 +240,7 @@ def calculate_server_to_local_actions(dir_path, url, current_sync_state, server_
             if download_file:
                 if file_length <= BLOCK_LENGTH:
                     # Download file in 1 go
-                    actions.append(("get-file", url, path, server_version))
+                    actions.append(("get-file", resource_url, name, path, server_version, file_hash))
                 else:
                     # Calculate blocks to download
                     local_block_hashes = local_entry["block_hashes"]
@@ -246,6 +248,16 @@ def calculate_server_to_local_actions(dir_path, url, current_sync_state, server_
                     server_block_hashes = [block_hash for _, _, _, block_hash, _ in server_blocks_response]
         elif entry_type == "folder":
             pass
+    return actions
+
+def perform_server_to_local_actions(actions, current_sync_state):
+    for action in actions:
+        action_name = action[0]
+        if action_name != "sync":
+            if action_name == "get-file":
+                perform_get_file(action, current_sync_state)
+        else:
+            perform_sync(action)
 
 def perform_put_file(action, sync_state_entry):
     _, file_path, name, url = action
@@ -283,6 +295,29 @@ def perform_post_file_version(action, sync_state_entry):
     }
     response = post(url, data)
     sync_state_entry["file_version"] = response["file_version"]
+
+def perform_get_file(action, current_sync_state):
+    _, url, name, path, file_version, file_hash = action
+    params = {
+        "file_version": file_version
+    }
+    data = get_file(url, params)
+    backup_file(path)
+    with open(path, "wb") as output_file:
+        output_file.write(data)
+    sync_state_entry = create_sync_state_entry(path)
+    sync_state_entry["file_version"] = file_version
+    assert sync_state_entry["file_hash"] == file_hash
+    current_sync_state[name] = sync_state_entry
+
+def backup_file(path):
+    if not os.path.exists(path):
+        # No existing file
+        return
+    dir_path = os.path.dirname(path)
+    backup_dir_path = os.path.join(dir_path, ".p7syncbak")
+    if not os.path.exists(backup_dir_path):
+        os.mkdir(backup_dir_path)
 
 
 def ensure_list_length(lst, length):
@@ -437,6 +472,12 @@ def put_data(url, data, params=None):
     }
     response = requests.put(url, data=data, headers=headers, params=params)
     return response.json
+
+def get_file(url, params=None):
+    headers = {
+        "Authorization": "Bearer " + USER_TOKEN
+    }
+    return requests.get(url, headers=headers, params=params).content
 
 def post(url, data):
     get_token(url)
