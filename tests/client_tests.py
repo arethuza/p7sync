@@ -42,7 +42,7 @@ class ClientTests(unittest.TestCase):
         self.assertTrue("foo" in server_contents)
         # Get the file contents
         data = get_file_data(SERVER_FOLDER_URL + "/foo")
-        self.assertEquals(b'0' * 100, data)
+        self.assertEquals(b'\x00' * 100, data)
         # Delete file locally
         delete_file("foo")
         # Sync again
@@ -145,21 +145,21 @@ class ClientTests(unittest.TestCase):
         self.assertEquals(1, sync_entry["file_version"])
         self.assertEquals(100, sync_entry["file_length"])
         self.assertIsNone(sync_entry["block_hashes"])
-        self.assertEquals("a32b7936a50b7da5e436c582186a6f9b6d5919640afca1d1dd17be67d6e52057", sync_entry["file_hash"])
+        self.assertEquals("0a3fb59710f6f76545c451d0b3198a45a8ab2bebd7ee298ddc80a0bd03597aa8", sync_entry["file_hash"])
         # Check what we have on server
         server_contents = list_server(SERVER_FOLDER_URL)
         self.assertEquals(1, len(server_contents))
         self.assertTrue("foo" in server_contents)
         # Get the file contents
         data = get_file_data(SERVER_FOLDER_URL + "/foo")
-        self.assertEquals(b'0' * 100, data)
+        self.assertEquals(b'\x00' * 100, data)
         # Get the metadata for the file
         response = get_json(SERVER_FOLDER_URL + "/foo?view=meta")
         props = response["props"]
         self.assertEquals(1, props["file_version"])
         self.assertEquals(100, props["file_length"])
         self.assertIsNone(sync_entry["block_hashes"])
-        self.assertEquals("a32b7936a50b7da5e436c582186a6f9b6d5919640afca1d1dd17be67d6e52057", props["file_hash"])
+        self.assertEquals("0a3fb59710f6f76545c451d0b3198a45a8ab2bebd7ee298ddc80a0bd03597aa8", props["file_hash"])
         # Update the file
         update_file("foo", 2, offset=100, contents=b'1')
         p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
@@ -170,14 +170,14 @@ class ClientTests(unittest.TestCase):
         self.assertEquals(2, sync_entry["file_version"])
         self.assertEquals(102, sync_entry["file_length"])
         self.assertIsNone(sync_entry["block_hashes"])
-        self.assertEquals("84b2f309f4b3493f40b9fbfe1de040b163539ad234f9360ea03e8676d5bb3c3e", sync_entry["file_hash"])
+        self.assertEquals("f993ee48e1fe66e3ddda9a9426b7d6680fb4d8c0ca604af5b35ff3107f6b2c99", sync_entry["file_hash"])
         # Get the metadata for the file
         response = get_json(SERVER_FOLDER_URL + "/foo?view=meta")
         props = response["props"]
         self.assertEquals(2, props["file_version"])
         self.assertEquals(102, props["file_length"])
         self.assertIsNone(sync_entry["block_hashes"])
-        self.assertEquals("84b2f309f4b3493f40b9fbfe1de040b163539ad234f9360ea03e8676d5bb3c3e", props["file_hash"])
+        self.assertEquals("f993ee48e1fe66e3ddda9a9426b7d6680fb4d8c0ca604af5b35ff3107f6b2c99", props["file_hash"])
         # Delete file locally
         delete_file("foo")
         # Sync again
@@ -204,7 +204,7 @@ class ClientTests(unittest.TestCase):
         self.assertEquals(0, sync_entry["file_version"])
         self.assertEquals(13002342, sync_entry["file_length"])
         self.assertIsNotNone(sync_entry["block_hashes"])
-        self.assertEquals("5fb0ff69587cad8c5050a84b4a729046333aa6077069b36c67ecca51fc316878", sync_entry["file_hash"])
+        self.assertEquals("50b79ed41ba49a9d1c5f201faee937596558d6f3045e9ae79e8846ae91af4f32", sync_entry["file_hash"])
         # Check what we have on server
         server_contents = list_server(SERVER_FOLDER_URL)
         self.assertEquals(1, len(server_contents))
@@ -272,7 +272,7 @@ class ClientTests(unittest.TestCase):
         props = child_entry["props"]
         self.assertEquals(1, props["file_version"])
         self.assertEquals(100, props["file_length"])
-        self.assertEquals("a32b7936a50b7da5e436c582186a6f9b6d5919640afca1d1dd17be67d6e52057", props["file_hash"])
+        self.assertEquals("0a3fb59710f6f76545c451d0b3198a45a8ab2bebd7ee298ddc80a0bd03597aa8", props["file_hash"])
         # Delete the file from the folder
         delete_file("foo", folder="f1")
         # Sync
@@ -305,11 +305,23 @@ class ClientTests(unittest.TestCase):
         self.assertEquals(1, sync_entry["file_version"])
         self.assertEquals(100, sync_entry["file_length"])
         self.assertIsNone(sync_entry["block_hashes"])
-        self.assertEquals("a32b7936a50b7da5e436c582186a6f9b6d5919640afca1d1dd17be67d6e52057", sync_entry["file_hash"])
+        self.assertEquals("0a3fb59710f6f76545c451d0b3198a45a8ab2bebd7ee298ddc80a0bd03597aa8", sync_entry["file_hash"])
 
-
-
-
+    def test_download_large_file(self):
+        client_authenticate()
+        # Create a file locally & sync
+        create_file("foo", length=p7sync.BLOCK_LENGTH * 3)
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Download to folder 2
+        p7sync.sync(LOCAL_FOLDER2, SERVER_FOLDER_URL)
+        # Check what we have locally
+        sync_file_contents = load_local_sync_file(folder=LOCAL_FOLDER2)
+        sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL]
+        sync_entry = sync_data_for_url["foo"]
+        self.assertEquals(0, sync_entry["file_version"])
+        self.assertEquals(p7sync.BLOCK_LENGTH * 3, sync_entry["file_length"])
+        self.assertEquals(3, len(sync_entry["block_hashes"]))
+        self.assertEquals("87bf23bc8ecbabac5b4474e090672b93acb47cb3ceea8ea19fc035482de1dbce", sync_entry["file_hash"])
 
 def authenticate():
     data = { "name": USER_NAME, "password": USER_PASSWORD}
@@ -368,7 +380,7 @@ def get_file_data(url):
     }
     return requests.get(url, headers=headers).content
 
-def create_file(name, length=100, contents=b'0', folder=None):
+def create_file(name, length=100, contents=b'\x00', folder=None):
     data = contents * length
     if folder is None:
         path = os.path.join(LOCAL_FOLDER, name)
@@ -380,7 +392,7 @@ def create_file(name, length=100, contents=b'0', folder=None):
     with open(path, "wb") as output_file:
         output_file.write(data)
 
-def update_file(name, length, offset=0, contents=b'0'):
+def update_file(name, length, offset=0, contents=b'\x01'):
     data = contents * length
     path = os.path.join(LOCAL_FOLDER, name)
     with open(path, "r+b") as output_file:

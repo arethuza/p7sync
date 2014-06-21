@@ -49,7 +49,6 @@ def sync(dir_path, url):
     perform_local_to_server_actions(local_to_server_actions, current_sync_state)
     # pull server changes locally
     server_state = get_server_directory_state(url)
-
     server_to_local_actions = calculate_server_to_local_actions(dir_path, url, current_sync_state, server_state)
     perform_server_to_local_actions(server_to_local_actions, current_sync_state)
     # Perform actions - updating current dir state
@@ -144,7 +143,6 @@ def create_sync_state_entry(file_path):
     }
     return result
 
-
 def get_changed_blocks(blocks1, blocks2):
     if blocks2 is None:
         return None
@@ -229,8 +227,9 @@ def calculate_server_to_local_actions(dir_path, url, current_sync_state, server_
             props = server_entry["props"]
             server_version = props["file_version"]
             file_length = props["file_length"]
-            file_hash = props["file_hash"]
+            server_hash = props["file_hash"]
             download_file = False
+            local_entry = None
             if name in current_sync_state:
                 local_entry = current_sync_state[name]
                 local_version = local_entry["file_version"]
@@ -238,25 +237,55 @@ def calculate_server_to_local_actions(dir_path, url, current_sync_state, server_
             else:
                 download_file = True
             if download_file:
+                if local_entry is not None:
+                    local_version = local_entry["file_version"]
+                else:
+                    local_version = -1
+                actions.append(("backup-file", path, name, local_version))
                 if file_length <= BLOCK_LENGTH:
                     # Download file in 1 go
-                    actions.append(("get-file", resource_url, name, path, server_version, file_hash))
+                    actions.append(("get-file", resource_url, name, path, server_version, server_hash))
                 else:
-                    # Calculate blocks to download
-                    local_block_hashes = local_entry["block_hashes"]
-                    server_blocks_response = get_json(url, {"list_blocks": True, "file_version": server_version})
-                    server_block_hashes = [block_hash for _, _, _, block_hash, _ in server_blocks_response]
+                    if local_entry is not None:
+                        local_block_hashes = local_entry["block_hashes"]
+                    else:
+                        local_block_hashes = dict()
+                    server_blocks_response = get_json(resource_url, params={"list_blocks": True,
+                                                                            "file_version": server_version})
+                    blocks_to_download = calculate_blocks_to_download(local_version, local_block_hashes,
+                                                                      server_blocks_response)
+                    for block_number, data_file_version, block_hash in blocks_to_download:
+                        actions.append(("get-block", resource_url, name, path, block_number,
+                                        data_file_version, block_hash))
+                    actions.append(("check-file", path, name, server_version, server_hash))
         elif entry_type == "folder":
             pass
     return actions
 
+def calculate_blocks_to_download(local_version, local_block_hashes, server_blocks_response):
+    result = []
+    for block in server_blocks_response:
+        block_number = block["block_number"]
+        data_file_version = block["data_file_version"]
+        block_hash = block["block_hash"]
+        if data_file_version > local_version:
+            local_hash = local_block_hashes[block_number] if block_number < len(local_block_hashes) else None
+            if block_hash != local_hash:
+                result.append((block_number, data_file_version, block_hash))
+    return result
+
 def perform_server_to_local_actions(actions, current_sync_state):
     for action in actions:
         action_name = action[0]
-        if action_name != "sync":
-            if action_name == "get-file":
-                perform_get_file(action, current_sync_state)
-        else:
+        if action_name == "backup-file":
+            perform_backup_file(action)
+        if action_name == "get-file":
+            perform_get_file(action, current_sync_state)
+        elif action_name == "get-block":
+            perform_get_block(action)
+        elif action_name == "check-file":
+            perform_check_file(action, current_sync_state)
+        elif action_name == "sync":
             perform_sync(action)
 
 def perform_put_file(action, sync_state_entry):
@@ -308,6 +337,26 @@ def perform_get_file(action, current_sync_state):
     sync_state_entry = create_sync_state_entry(path)
     sync_state_entry["file_version"] = file_version
     assert sync_state_entry["file_hash"] == file_hash
+    current_sync_state[name] = sync_state_entry
+
+def perform_get_block(action):
+    _, url, name, path, block_number, data_file_version, block_hash = action
+    params = {
+        "block_number": block_number,
+        "file_version": data_file_version
+    }
+    data = get_file(url, params)
+    local_block_hash = get_hash(data)
+    assert local_block_hash == block_hash
+    backup_file(path)
+    write_block(path, block_number, data)
+
+def perform_check_file(action, current_sync_state):
+    _, path, name, file_version, file_hash = action
+    sync_state_entry = create_sync_state_entry(path)
+    local_file_hash = sync_state_entry["file_hash"]
+    assert local_file_hash == file_hash
+    sync_state_entry["file_version"] = file_version
     current_sync_state[name] = sync_state_entry
 
 def backup_file(path):
@@ -366,6 +415,10 @@ def perform_sync(action):
     _, dir_path, url = action
     sync(dir_path, url)
 
+def perform_backup_file(action):
+    _, path, name, version = action
+    pass
+
 def get_block_hashes(file_path):
     """ Get the hashes for the blocks in a local file """
     file_length = os.path.getsize(file_path)
@@ -390,6 +443,12 @@ def read_block(file_path, block_number):
         data = input_file.read(read_length)
     return data
 
+
+def write_block(file_path, block_number, data):
+    offset = BLOCK_LENGTH * block_number
+    with open(file_path, "w+b") as output_file:
+        output_file.seek(offset)
+        data = output_file.write(data)
 
 def get_hash(data):
     """ Get the hash for some data """
