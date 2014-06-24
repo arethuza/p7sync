@@ -322,6 +322,40 @@ class ClientTests(unittest.TestCase):
         self.assertEquals(p7sync.BLOCK_LENGTH * 3, sync_entry["file_length"])
         self.assertEquals(3, len(sync_entry["block_hashes"]))
         self.assertEquals("87bf23bc8ecbabac5b4474e090672b93acb47cb3ceea8ea19fc035482de1dbce", sync_entry["file_hash"])
+        # Modify a small part of the file
+        update_file("foo", offset=100, length=2, contents=b'1')
+        # Sync change
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Download to folder 2
+        local_to_server_actions, server_to_local_actions = p7sync.sync(LOCAL_FOLDER2, SERVER_FOLDER_URL)
+        self.assertEquals([], local_to_server_actions)
+        # Make sure we are only downloading one block
+        self.assertEquals(3, len(server_to_local_actions))
+        self.assertEquals("backup-file", server_to_local_actions[0][0])
+        self.assertEquals("get-block", server_to_local_actions[1][0])
+        self.assertEquals("check-file", server_to_local_actions[2][0])
+        # Check what we have locally
+        sync_file_contents = load_local_sync_file(folder=LOCAL_FOLDER2)
+        sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL]
+        sync_entry = sync_data_for_url["foo"]
+        self.assertEquals(1, sync_entry["file_version"])
+        self.assertEquals(p7sync.BLOCK_LENGTH * 3, sync_entry["file_length"])
+        self.assertEquals(3, len(sync_entry["block_hashes"]))
+        self.assertEquals("0d4749962eb0411ced9bd2d1406f58de997bdfcad687ac86ab9c5f85284d4f6d", sync_entry["file_hash"])
+        # Create a shorter file
+        create_file("foo", length=int(p7sync.BLOCK_LENGTH * 1.5))
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Download to folder 2
+        p7sync.sync(LOCAL_FOLDER2, SERVER_FOLDER_URL)
+        # Check what we have locally
+        sync_file_contents = load_local_sync_file(folder=LOCAL_FOLDER2)
+        sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL]
+        sync_entry = sync_data_for_url["foo"]
+        self.assertEquals(2, sync_entry["file_version"])
+        self.assertEquals(int(p7sync.BLOCK_LENGTH * 1.5), sync_entry["file_length"])
+        self.assertEquals(2, len(sync_entry["block_hashes"]))
+        self.assertEquals("faef5fa98ef7915cf2d865b112ed0fd7c5f8ca3336e52716ee661fab5f833807", sync_entry["file_hash"])
+
 
 def authenticate():
     data = { "name": USER_NAME, "password": USER_PASSWORD}

@@ -16,6 +16,7 @@ USER_PASSWORD = None
 USER_TOKEN = None
 
 SYNC_FILE_NAME = ".sync.json"
+BACKUP_DIR_NAME = ".p7syncbak"
 
 def main():
     command, dir_path, url = parse_args()
@@ -54,7 +55,7 @@ def sync(dir_path, url):
     # Perform actions - updating current dir state
     if len(local_to_server_actions) > 0 or len(server_to_local_actions) > 0:
         update_sync_state_file(dir_path, url, current_sync_state)
-
+    return local_to_server_actions, server_to_local_actions
 
 def list_changes(dir_path):
     sync_file_contents = load_sync_file(dir_path)
@@ -93,7 +94,7 @@ def update_sync_state(dir_path, previous_sync_state):
             local_changes.append(("deleted", name))
     # Look at the contents of the dir
     for name in os.listdir(dir_path):
-        if name == SYNC_FILE_NAME:
+        if name == SYNC_FILE_NAME or name == BACKUP_DIR_NAME:
             continue
         path = os.path.join(dir_path, name)
         if os.path.isfile(path):
@@ -254,9 +255,11 @@ def calculate_server_to_local_actions(dir_path, url, current_sync_state, server_
                                                                             "file_version": server_version})
                     blocks_to_download = calculate_blocks_to_download(local_version, local_block_hashes,
                                                                       server_blocks_response)
+                    last_block_number = len(server_blocks_response) - 1
                     for block_number, data_file_version, block_hash in blocks_to_download:
+                        is_last_block = block_number == last_block_number
                         actions.append(("get-block", resource_url, name, path, block_number,
-                                        data_file_version, block_hash))
+                                        data_file_version, block_hash, is_last_block))
                     actions.append(("check-file", path, name, server_version, server_hash))
         elif entry_type == "folder":
             pass
@@ -340,7 +343,7 @@ def perform_get_file(action, current_sync_state):
     current_sync_state[name] = sync_state_entry
 
 def perform_get_block(action):
-    _, url, name, path, block_number, data_file_version, block_hash = action
+    _, url, name, path, block_number, data_file_version, block_hash, is_last_block = action
     params = {
         "block_number": block_number,
         "file_version": data_file_version
@@ -349,7 +352,7 @@ def perform_get_block(action):
     local_block_hash = get_hash(data)
     assert local_block_hash == block_hash
     backup_file(path)
-    write_block(path, block_number, data)
+    write_block(path, block_number, data, is_last_block)
 
 def perform_check_file(action, current_sync_state):
     _, path, name, file_version, file_hash = action
@@ -364,7 +367,7 @@ def backup_file(path):
         # No existing file
         return
     dir_path = os.path.dirname(path)
-    backup_dir_path = os.path.join(dir_path, ".p7syncbak")
+    backup_dir_path = os.path.join(dir_path, BACKUP_DIR_NAME)
     if not os.path.exists(backup_dir_path):
         os.mkdir(backup_dir_path)
 
@@ -444,9 +447,10 @@ def read_block(file_path, block_number):
     return data
 
 
-def write_block(file_path, block_number, data):
+def write_block(file_path, block_number, data, is_last_block):
     offset = BLOCK_LENGTH * block_number
-    with open(file_path, "w+b") as output_file:
+    mode = "r+b" if os.path.exists(file_path) and not is_last_block else "wb"
+    with open(file_path, mode) as output_file:
         output_file.seek(offset)
         data = output_file.write(data)
 
