@@ -8,6 +8,7 @@ import hashlib
 import copy
 import dateutil.parser
 import itertools
+import shutil
 
 BLOCK_LENGTH=int(math.pow(2, 22))
 
@@ -240,9 +241,12 @@ def calculate_server_to_local_actions(dir_path, url, current_sync_state, server_
             if download_file:
                 if local_entry is not None:
                     local_version = local_entry["file_version"]
+                    local_hash = local_entry["file_hash"]
                 else:
                     local_version = -1
-                actions.append(("backup-file", path, name, local_version))
+                    local_hash = None
+                if os.path.exists(path):
+                    actions.append(("backup-file", path, local_version, local_hash))
                 if file_length <= BLOCK_LENGTH:
                     # Download file in 1 go
                     actions.append(("get-file", resource_url, name, path, server_version, server_hash))
@@ -262,7 +266,9 @@ def calculate_server_to_local_actions(dir_path, url, current_sync_state, server_
                                         data_file_version, block_hash, is_last_block))
                     actions.append(("check-file", path, name, server_version, server_hash))
         elif entry_type == "folder":
-            pass
+            if not os.path.isdir(path):
+                actions.append(("create-dir", path))
+            actions.append(("sync", path, resource_url))
     return actions
 
 def calculate_blocks_to_download(local_version, local_block_hashes, server_blocks_response):
@@ -288,6 +294,8 @@ def perform_server_to_local_actions(actions, current_sync_state):
             perform_get_block(action)
         elif action_name == "check-file":
             perform_check_file(action, current_sync_state)
+        elif action_name == "create-dir":
+            perform_create_dir(action)
         elif action_name == "sync":
             perform_sync(action)
 
@@ -334,7 +342,6 @@ def perform_get_file(action, current_sync_state):
         "file_version": file_version
     }
     data = get_file(url, params)
-    backup_file(path)
     with open(path, "wb") as output_file:
         output_file.write(data)
     sync_state_entry = create_sync_state_entry(path)
@@ -351,7 +358,6 @@ def perform_get_block(action):
     data = get_file(url, params)
     local_block_hash = get_hash(data)
     assert local_block_hash == block_hash
-    backup_file(path)
     write_block(path, block_number, data, is_last_block)
 
 def perform_check_file(action, current_sync_state):
@@ -362,7 +368,12 @@ def perform_check_file(action, current_sync_state):
     sync_state_entry["file_version"] = file_version
     current_sync_state[name] = sync_state_entry
 
-def backup_file(path):
+def perform_create_dir(action):
+    _, path = action
+    os.mkdir(path)
+
+
+def backup_file(path, version, file_hash):
     if not os.path.exists(path):
         # No existing file
         return
@@ -370,7 +381,12 @@ def backup_file(path):
     backup_dir_path = os.path.join(dir_path, BACKUP_DIR_NAME)
     if not os.path.exists(backup_dir_path):
         os.mkdir(backup_dir_path)
-
+    backup_file_name = os.path.basename(path) + "-" + str(version)
+    backup_path = os.path.join(backup_dir_path, backup_file_name)
+    shutil.copyfile(path, backup_path)
+    backup_block_hashes = get_block_hashes(backup_path)
+    backup_file_hash = get_file_hash(backup_block_hashes)
+    assert backup_file_hash == file_hash
 
 def ensure_list_length(lst, length):
     if lst is None:
@@ -419,8 +435,8 @@ def perform_sync(action):
     sync(dir_path, url)
 
 def perform_backup_file(action):
-    _, path, name, version = action
-    pass
+    _, path, version, file_hash = action
+    backup_file(path, version, file_hash)
 
 def get_block_hashes(file_path):
     """ Get the hashes for the blocks in a local file """

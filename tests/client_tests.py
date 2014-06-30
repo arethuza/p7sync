@@ -356,6 +356,43 @@ class ClientTests(unittest.TestCase):
         self.assertEquals(2, len(sync_entry["block_hashes"]))
         self.assertEquals("faef5fa98ef7915cf2d865b112ed0fd7c5f8ca3336e52716ee661fab5f833807", sync_entry["file_hash"])
 
+    def test_download_file_in_folder(self):
+        client_authenticate()
+        # Create a file locally
+        create_file("foo", folder="f1")
+        # Sync
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Download to folder 2
+        p7sync.sync(LOCAL_FOLDER2, SERVER_FOLDER_URL)
+        # Check local sync file contents
+        sync_file_contents = load_local_sync_file()
+        sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL]
+        self.assertEquals(1, len(sync_data_for_url))
+        sync_entry = sync_data_for_url["f1"]
+        self.assertEquals(1, len(sync_entry))
+        self.assertEquals("dir", sync_entry["type"])
+        # Check on server
+        response = get_json(SERVER_FOLDER_URL + "/f1")
+        children = response["children"]
+        self.assertEquals(1, len(children))
+        child_entry = children[0]
+        self.assertEquals("foo", child_entry["name"])
+        props = child_entry["props"]
+        self.assertEquals(1, props["file_version"])
+        self.assertEquals(100, props["file_length"])
+        self.assertEquals("0a3fb59710f6f76545c451d0b3198a45a8ab2bebd7ee298ddc80a0bd03597aa8", props["file_hash"])
+        # Check file in folder
+        sync_file_contents = load_local_sync_file(folder=os.path.join(LOCAL_FOLDER2, "f1"))
+        sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL + "/f1"]
+        self.assertIsNotNone(sync_data_for_url)
+        sync_entry = sync_data_for_url["foo"]
+        self.assertIsNotNone(sync_entry)
+        self.assertEquals(1, sync_entry["file_version"])
+        self.assertEquals(100, sync_entry["file_length"])
+        self.assertEquals("0a3fb59710f6f76545c451d0b3198a45a8ab2bebd7ee298ddc80a0bd03597aa8", sync_entry["file_hash"])
+        # Delete
+
+
 
 def authenticate():
     data = { "name": USER_NAME, "password": USER_PASSWORD}
