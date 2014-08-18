@@ -219,7 +219,7 @@ def calculate_server_to_local_actions(dir_path, url, current_sync_state, server_
         if not name in server_state:
             # Delete item locally
             path = os.path.join(dir_path, name)
-            actions.append(("delete-local", path))
+            actions.append(("delete-local", path, name))
     # Compare what is on server to what we have locally
     for name, server_entry in server_state.items():
         entry_type = server_entry["type"]
@@ -267,7 +267,7 @@ def calculate_server_to_local_actions(dir_path, url, current_sync_state, server_
                     actions.append(("check-file", path, name, server_version, server_hash))
         elif entry_type == "folder":
             if not os.path.isdir(path):
-                actions.append(("create-dir", path))
+                actions.append(("create-dir", path, name))
             actions.append(("sync", path, resource_url))
     return actions
 
@@ -295,7 +295,9 @@ def perform_server_to_local_actions(actions, current_sync_state):
         elif action_name == "check-file":
             perform_check_file(action, current_sync_state)
         elif action_name == "create-dir":
-            perform_create_dir(action)
+            perform_create_dir(action, current_sync_state)
+        elif action_name == "delete-local":
+            perform_delete_local(action, current_sync_state)
         elif action_name == "sync":
             perform_sync(action)
 
@@ -368,10 +370,20 @@ def perform_check_file(action, current_sync_state):
     sync_state_entry["file_version"] = file_version
     current_sync_state[name] = sync_state_entry
 
-def perform_create_dir(action):
-    _, path = action
+def perform_create_dir(action, current_sync_state):
+    _, path, name = action
     os.mkdir(path)
+    current_sync_state[name] = {
+        "type": "dir"
+    }
 
+def perform_delete_local(action, current_sync_state):
+    _, path, name = action
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    else:
+        os.remove(path)
+    del current_sync_state[name]
 
 def backup_file(path, version, file_hash):
     if not os.path.exists(path):
@@ -432,7 +444,11 @@ def perform_post_folder_server(action, server_state_entry):
 
 def perform_sync(action):
     _, dir_path, url = action
-    sync(dir_path, url)
+    try:
+        sync(dir_path, url)
+    except Exception:
+        # TODO log this
+        pass
 
 def perform_backup_file(action):
     _, path, version, file_hash = action
@@ -522,6 +538,8 @@ def get_json(url, params=None):
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
             raise Exception()
+    if response.status_code != 200:
+        raise Exception()
     return response.json
 
 def get_token(url, force_request=False):

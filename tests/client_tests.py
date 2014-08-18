@@ -381,6 +381,12 @@ class ClientTests(unittest.TestCase):
         self.assertEquals(1, props["file_version"])
         self.assertEquals(100, props["file_length"])
         self.assertEquals("0a3fb59710f6f76545c451d0b3198a45a8ab2bebd7ee298ddc80a0bd03597aa8", props["file_hash"])
+        # Check sync file contents for top level folder
+        sync_file_contents = load_local_sync_file(LOCAL_FOLDER2)
+        self.assertIsNotNone(sync_data_for_url)
+        sync_entry = sync_data_for_url["f1"]
+        self.assertIsNotNone(sync_entry)
+        self.assertEquals("dir", sync_entry["type"])
         # Check file in folder
         sync_file_contents = load_local_sync_file(folder=os.path.join(LOCAL_FOLDER2, "f1"))
         sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL + "/f1"]
@@ -391,7 +397,40 @@ class ClientTests(unittest.TestCase):
         self.assertEquals(100, sync_entry["file_length"])
         self.assertEquals("0a3fb59710f6f76545c451d0b3198a45a8ab2bebd7ee298ddc80a0bd03597aa8", sync_entry["file_hash"])
         # Delete
-
+        delete_file("foo", folder="f1")
+        # Sync
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Sync to folder 2
+        p7sync.sync(LOCAL_FOLDER2, SERVER_FOLDER_URL)
+        # Check file isn't there anymore
+        self.assertFalse(os.path.exists(os.path.join(LOCAL_FOLDER2, "f1", "foo")))
+        # But the folder is
+        self.assertTrue(os.path.exists(os.path.join(LOCAL_FOLDER2, "f1")))
+        # Check sync file contents for top level folder
+        sync_file_contents = load_local_sync_file(LOCAL_FOLDER2)
+        sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL]
+        self.assertIsNotNone(sync_data_for_url)
+        sync_entry = sync_data_for_url["f1"]
+        self.assertIsNotNone(sync_entry)
+        self.assertEquals("dir", sync_entry["type"])
+        # Check sync file contents for sub folder
+        sync_file_contents = load_local_sync_file(folder=os.path.join(LOCAL_FOLDER2, "f1"))
+        sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL + "/f1"]
+        self.assertIsNotNone(sync_data_for_url)
+        self.assertEquals(0, len(sync_data_for_url))
+        # Delete the sub folder
+        shutil.rmtree(os.path.join(LOCAL_FOLDER, "f1"))
+        # Sync
+        p7sync.sync(LOCAL_FOLDER, SERVER_FOLDER_URL)
+        # Sync to folder 2
+        p7sync.sync(LOCAL_FOLDER2, SERVER_FOLDER_URL)
+        # Folder isn't there anymore
+        self.assertFalse(os.path.exists(os.path.join(LOCAL_FOLDER2, "f1")))
+        # Check sync file contents for top level folder
+        sync_file_contents = load_local_sync_file(LOCAL_FOLDER2)
+        sync_data_for_url = sync_file_contents[SERVER_FOLDER_URL]
+        self.assertIsNotNone(sync_data_for_url)
+        self.assertFalse("f1" in sync_data_for_url)
 
 
 def authenticate():
